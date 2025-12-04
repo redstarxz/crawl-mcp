@@ -1,5 +1,6 @@
 # Crawl4AI MCP Server
 
+[![Runpod](https://api.runpod.io/badge/redstarxz/crawl-mcp)](https://console.runpod.io/hub/redstarxz/crawl-mcp)
 A comprehensive Model Context Protocol (MCP) server that wraps the powerful crawl4ai library. This server provides advanced web crawling, content extraction, and AI-powered analysis capabilities through the standardized MCP interface.
 
 ## 🚀 Key Features

@@ -5,7 +5,7 @@
   "category": "language",
   "iconUrl": "https://example.com/icon.png",
   "config": {
-    "runsOn": "GPU",
+    "runsOn": "CPU",
     "containerDiskInGb": 20,
     "presets": [
       {

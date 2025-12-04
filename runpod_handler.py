@@ -92,157 +92,97 @@ def run_async_safe(coro):
 
 async def handle_crawl_request(operation: str, params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Handle different crawling operations by calling the underlying MCP functions properly
+    Unified handler for all Crawl4AI MCP operations.
+    Automatically supports FunctionTool.fn, callable functions, and request classes.
     """
     try:
         logger.info(f"Executing operation: {operation} with params: {params}")
-        
-        # Import the request/response classes we need
+
+        # Import all request types
         from crawl4ai_mcp.server import (
-            CrawlRequest, FileProcessRequest, 
-            GoogleSearchRequest, GoogleBatchSearchRequest
+            CrawlRequest, FileProcessRequest,
+            GoogleSearchRequest, GoogleBatchSearchRequest,
+            StructuredExtractionRequest
         )
-        
-        # Handle different operations with proper parameter construction
-        if operation == 'crawl_url':
-            request = CrawlRequest(**params)
-            
-            # Diagnostic logging to understand the function type
-            crawl_func = mcp_server.crawl_url
-            logger.info(f"Function type: {type(crawl_func)}")
-            logger.info(f"Function callable: {callable(crawl_func)}")
-            logger.info(f"Function dir: {[attr for attr in dir(crawl_func) if not attr.startswith('_')]}")
-            
-            # Check if it's a FastMCP FunctionTool that needs special handling
-            if hasattr(crawl_func, 'func'):
-                logger.info("Function has .func attribute, using it")
-                result = await crawl_func.func(request)
-            elif hasattr(crawl_func, '__call__'):
-                logger.info("Function is callable, calling directly")
-                result = await crawl_func(request)
-            else:
-                logger.error(f"Function is not callable and has no .func attribute: {type(crawl_func)}")
-                raise TypeError(f"'{type(crawl_func).__name__}' object is not callable")
-                
-        elif operation == 'crawl_url_with_fallback':
-            request = CrawlRequest(**params)
-            crawl_func = mcp_server.crawl_url_with_fallback
-            if hasattr(crawl_func, 'func'):
-                result = await crawl_func.func(request)
-            else:
-                result = await crawl_func(request)
-                
-        elif operation == 'process_file':
-            request = FileProcessRequest(**params)
-            process_func = mcp_server.process_file
-            if hasattr(process_func, 'func'):
-                result = await process_func.func(request)
-            else:
-                result = await process_func(request)
-                
-        elif operation == 'search_google':
-            request = GoogleSearchRequest(**params)
-            search_func = mcp_server.search_google
-            if hasattr(search_func, 'func'):
-                result = await search_func.func(request)
-            else:
-                result = await search_func(request)
-                
-        elif operation == 'batch_search_google':
-            request = GoogleBatchSearchRequest(**params)
-            batch_func = mcp_server.batch_search_google
-            if hasattr(batch_func, 'func'):
-                result = await batch_func.func(request)
-            else:
-                result = await batch_func(request)
-                
-        elif operation == 'extract_structured_data':
-            # This one uses StructuredExtractionRequest
-            from crawl4ai_mcp.server import StructuredExtractionRequest
-            request = StructuredExtractionRequest(**params)
-            extract_func = mcp_server.extract_structured_data
-            if hasattr(extract_func, 'func'):
-                result = await extract_func.func(request)
-            else:
-                result = await extract_func(request)
-                
-        # For operations that take simple parameters, call with fallback
-        elif operation == 'deep_crawl_site':
-            deep_func = mcp_server.deep_crawl_site
-            if hasattr(deep_func, 'func'):
-                result = await deep_func.func(**params)
-            else:
-                result = await deep_func(**params)
-                
-        elif operation == 'intelligent_extract':
-            intel_func = mcp_server.intelligent_extract
-            if hasattr(intel_func, 'func'):
-                result = await intel_func.func(**params)
-            else:
-                result = await intel_func(**params)
-                
-        elif operation == 'extract_entities':
-            entities_func = mcp_server.extract_entities
-            if hasattr(entities_func, 'func'):
-                result = await entities_func.func(**params)
-            else:
-                result = await entities_func(**params)
-                
-        elif operation == 'extract_youtube_transcript':
-            youtube_func = mcp_server.extract_youtube_transcript
-            if hasattr(youtube_func, 'func'):
-                result = await youtube_func.func(params)
-            else:
-                result = await youtube_func(params)
-                
-        elif operation == 'batch_extract_youtube_transcripts':
-            batch_youtube_func = mcp_server.batch_extract_youtube_transcripts
-            if hasattr(batch_youtube_func, 'func'):
-                result = await batch_youtube_func.func(params)
-            else:
-                result = await batch_youtube_func(params)
-                
-        elif operation == 'batch_crawl':
-            batch_func = mcp_server.batch_crawl
-            if hasattr(batch_func, 'func'):
-                result = await batch_func.func(**params)
-            else:
-                result = await batch_func(**params)
-                
-        elif operation == 'search_and_crawl':
-            search_crawl_func = mcp_server.search_and_crawl
-            if hasattr(search_crawl_func, 'func'):
-                result = await search_crawl_func.func(**params)
-            else:
-                result = await search_crawl_func(**params)
-                
-        else:
+
+        # Map operation → (mcp function, request class OR None)
+        OP_TABLE = {
+            "crawl_url": (mcp_server.crawl_url, CrawlRequest),
+            "crawl_url_with_fallback": (mcp_server.crawl_url_with_fallback, CrawlRequest),
+            "process_file": (mcp_server.process_file, FileProcessRequest),
+            "search_google": (mcp_server.search_google, GoogleSearchRequest),
+            "batch_search_google": (mcp_server.batch_search_google, GoogleBatchSearchRequest),
+            "extract_structured_data": (mcp_server.extract_structured_data, StructuredExtractionRequest),
+
+            # No request class → call with **params
+            "deep_crawl_site": (mcp_server.deep_crawl_site, None),
+            "intelligent_extract": (mcp_server.intelligent_extract, None),
+            "extract_entities": (mcp_server.extract_entities, None),
+            "search_and_crawl": (mcp_server.search_and_crawl, None),
+            "batch_crawl": (mcp_server.batch_crawl, None),
+
+            # YouTube transcript endpoints accept dict directly
+            "extract_youtube_transcript": (mcp_server.extract_youtube_transcript, "raw"),
+            "batch_extract_youtube_transcripts": (mcp_server.batch_extract_youtube_transcripts, "raw"),
+        }
+
+        if operation not in OP_TABLE:
             return {
-                'error': f'Unknown operation: {operation}',
-                'available_operations': [
-                    'crawl_url', 'crawl_url_with_fallback', 'deep_crawl_site',
-                    'intelligent_extract', 'extract_entities', 'extract_structured_data',
-                    'process_file', 'extract_youtube_transcript', 'batch_extract_youtube_transcripts',
-                    'search_google', 'batch_search_google', 'search_and_crawl', 'batch_crawl'
-                ]
+                "success": False,
+                "error": f"Unknown operation: {operation}",
+                "available_operations": list(OP_TABLE.keys())
             }
-        
+
+        func, req_type = OP_TABLE[operation]
+
+        # ---- prepare request object ----
+        if req_type is None:
+            # Call with keyword arguments
+            req_obj = params
+        elif req_type == "raw":
+            # Pass the params dict directly
+            req_obj = params
+        else:
+            # Instantiate a request dataclass
+            req_obj = req_type(**params)
+
+        # ---- call the underlying MCP tool ----
+        async def call_tool(f, arg):
+            # FunctionTool: use .fn
+            if hasattr(f, "fn"):
+                logger.info("Calling FunctionTool.fn")
+                return await f.fn(arg) if arg is not params else await f.fn(**arg)
+
+            # FastMCP old version: has `.func`
+            if hasattr(f, "func"):
+                logger.info("Calling FunctionTool.func")
+                return await f.func(arg) if arg is not params else await f.func(**arg)
+
+            # Normal function
+            if callable(f):
+                logger.info("Calling callable function directly")
+                return await f(arg) if arg is not params else await f(**arg)
+
+            raise TypeError(f"{f} is not callable and has no .fn")
+
+        # Execute the tool
+        result = await call_tool(func, req_obj)
+
         return {
-            'operation': operation,
-            'success': True,
-            'result': result
+            "operation": operation,
+            "success": True,
+            "result": result
         }
-        
+
     except Exception as e:
-        logger.error(f"Error executing {operation}: {str(e)}")
-        logger.error(f"Exception type: {type(e).__name__}")
-        logger.error(f"Parameters received: {params}")
+        logger.error(f"Error in {operation}: {e}")
         return {
-            'operation': operation,
-            'success': False,
-            'error': str(e),
-            'error_type': type(e).__name__
+            "operation": operation,
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__
         }
+
 
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     """

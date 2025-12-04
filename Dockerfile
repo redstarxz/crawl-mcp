@@ -7,8 +7,10 @@ FROM python:3.11-slim
 WORKDIR /
 
 # Install system dependencies for Playwright and file processing
+# Install Python dependencies
+# Install system dependencies for Playwright and file processing
+# First install runpod for serverless functionality
 RUN apt-get update && apt-get install -y \
-    # Playwright browser dependencies
     libnss3 \
     libnspr4 \
     libasound2 \
@@ -17,21 +19,19 @@ RUN apt-get update && apt-get install -y \
     libgtk-3-0 \
     libgbm1 \
     libxss1 \
-    libgconf-2-4 \
     libxtst6 \
     libxrandr2 \
     libpangocairo-1.0-0 \
     libatk1.0-0 \
     libcairo-gobject2 \
-    libgtk-3-0 \
-    libgdk-pixbuf2.0-0 \
-    # Additional utilities
+    libgdk-pixbuf-2.0-0 \
+    libgdk-pixbuf-xlib-2.0-0 \
+    gdk-pixbuf2.0-bin \
+    gdk-pixbuf2.0-common \
     curl \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-# First install runpod for serverless functionality
 RUN pip install --no-cache-dir runpod
 
 # Copy requirements and install project dependencies

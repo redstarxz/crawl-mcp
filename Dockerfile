@@ -1,27 +1,14 @@
-# Multi-stage build for optimized production image
-FROM python:3.11-slim as builder
+# RunPod Serverless Dockerfile for Crawl4AI MCP Server
+# Optimized for CPU-only serverless workloads
 
-# Install system dependencies for building
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Production stage
 FROM python:3.11-slim
 
-# Install runtime system dependencies including Playwright requirements
+# Set working directory
+WORKDIR /
+
+# Install system dependencies for Playwright and file processing
 RUN apt-get update && apt-get install -y \
-    # Playwright dependencies
+    # Playwright browser dependencies
     libnss3 \
     libnspr4 \
     libasound2 \
@@ -33,48 +20,62 @@ RUN apt-get update && apt-get install -y \
     libgconf-2-4 \
     libxtst6 \
     libxrandr2 \
-    libasound2 \
     libpangocairo-1.0-0 \
     libatk1.0-0 \
     libcairo-gobject2 \
     libgtk-3-0 \
     libgdk-pixbuf2.0-0 \
-    # Additional dependencies for file processing
+    # Additional utilities
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy virtual environment from builder stage
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Install Python dependencies
+# First install runpod for serverless functionality
+RUN pip install --no-cache-dir runpod
+
+# Copy requirements and install project dependencies
+COPY requirements.txt .
+COPY requirements-runpod.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements-runpod.txt
+
+# Copy the entire project first
+COPY . .
+
+# Copy RunPod handler
+COPY runpod_handler.py /
 
 # Create non-root user for security
 RUN groupadd --gid 1000 mcpuser && \
     useradd --uid 1000 --gid mcpuser --shell /bin/bash --create-home mcpuser
 
-# Set working directory
-WORKDIR /app
+# Change ownership of application directories only (not entire filesystem)
+RUN chown -R mcpuser:mcpuser /crawl4ai_mcp && \
+    chown mcpuser:mcpuser /runpod_handler.py && \
+    chown mcpuser:mcpuser /requirements.txt && \
+    chown mcpuser:mcpuser /requirements-runpod.txt
 
-# Copy application code
-COPY . .
-
-# Install Playwright browsers in the virtual environment
-RUN playwright install chromium
-
-# Change ownership to non-root user
-RUN chown -R mcpuser:mcpuser /app /opt/venv
-
-# Switch to non-root user
+# Switch to non-root user before installing browsers
 USER mcpuser
 
-# Set environment variables
-ENV PYTHONPATH=/app
+# Install Playwright browsers as the mcpuser (Chromium only for efficiency)
+RUN playwright install chromium
+
+# Create test input file for local testing in user's home directory
+RUN echo '{"input": {"operation": "crawl_url", "params": {"url": "https://httpbin.org/html", "generate_markdown": true}}}' > /home/mcpuser/test_input.json
+
+# Set environment variables for RunPod
+ENV PYTHONPATH=/
 ENV PYTHONUNBUFFERED=1
 ENV FASTMCP_LOG_LEVEL=INFO
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import asyncio; from crawl4ai_mcp.server import mcp; print('Health check passed')" || exit 1
+# Enable GPU acceleration for serverless (RunPod provides GPU by default)
+ENV CRAWL4AI_ENABLE_GPU=true
 
-# Default command (can be overridden in docker-compose)
-CMD ["python", "-m", "crawl4ai_mcp.server"]
+# Health check (optional for RunPod)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "from crawl4ai_mcp.server import mcp; print('Health check passed')" || exit 1
+
+# Start the RunPod serverless worker
+CMD ["python", "-u", "runpod_handler.py"]
